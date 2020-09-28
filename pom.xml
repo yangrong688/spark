@@ -260,6 +260,14 @@
   </properties>
   <repositories>
     <repository>
+      <id>cloudera</id>
+      <url>https://repository.cloudera.com/artifactory/cloudera-repos/</url>
+      <name>Cloudera Repositories</name>
+      <snapshots>
+        <enabled>true</enabled>
+      </snapshots>
+    </repository>
+    <repository>
       <id>gcs-maven-central-mirror</id>
       <!--
         Google Mirror of Maven Central, placed first so that it's used instead of flaky Maven Central.
@@ -290,6 +298,11 @@
     </repository>
   </repositories>
   <pluginRepositories>
+    <pluginRepository>
+      <id>cloudera</id>
+      <name>Cloudera Repositories</name>
+      <url>https://repository.cloudera.com/artifactory/cloudera-repos/</url>
+    </pluginRepository>
     <pluginRepository>
       <id>gcs-maven-central-mirror</id>
       <!--
@@ -3066,6 +3079,13 @@
     </profile>
 
     <profile>
+      <id>hadoop-3.0</id>
+      <properties>
+        <hadoop.version>3.0.0-cdh6.1.0</hadoop.version>
+      </properties>
+    </profile>
+
+    <profile>
       <id>hadoop-3.2</id>
       <properties>
         <hadoop.version>3.2.0</hadoop.version>
@@ -3073,6 +3093,7 @@
       </properties>
     </profile>
 
+    
     <profile>
       <id>hive-1.2</id>
       <properties>
