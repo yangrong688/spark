@@ -37,13 +37,18 @@ import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions.Attribute
 import org.apache.spark.sql.catalyst.plans.logical.LocalRelation
 import org.apache.spark.sql.catalyst.util.quietly
+import org.apache.spark.sql.connector.{RangeInputPartition, SimpleScanBuilder}
+import org.apache.spark.sql.connector.metric.{CustomMetric, CustomTaskMetric}
+import org.apache.spark.sql.connector.read.{InputPartition, PartitionReader, PartitionReaderFactory}
 import org.apache.spark.sql.execution.{LeafExecNode, QueryExecution, SparkPlanInfo, SQLExecution}
 import org.apache.spark.sql.execution.adaptive.DisableAdaptiveExecution
+import org.apache.spark.sql.execution.datasources.v2.BatchScanExec
 import org.apache.spark.sql.execution.metric.{SQLMetric, SQLMetrics}
 import org.apache.spark.sql.functions.count
 import org.apache.spark.sql.internal.SQLConf
 import org.apache.spark.sql.internal.StaticSQLConf.UI_RETAINED_EXECUTIONS
 import org.apache.spark.sql.test.SharedSparkSession
+import org.apache.spark.sql.types.StructType
 import org.apache.spark.status.ElementTrackingStore
 import org.apache.spark.util.{AccumulatorMetadata, JsonProtocol, LongAccumulator}
 import org.apache.spark.util.kvstore.InMemoryStore
@@ -680,7 +685,7 @@ class SQLAppStatusListenerSuite extends SharedSparkSession with JsonTestUtils
     assert(sparkPlanInfo.nodeName === "WholeStageCodegen (2)")
   }
 
-  test("SPARK-32615: SQLMetrics validation after sparkPlanInfo updated in AQE") {
+  test("SPARK-32615,SPARK-33016: SQLMetrics validation after sparkPlanInfo updated in AQE") {
     val statusStore = createStatusStore()
     val listener = statusStore.listener.get
 
@@ -755,7 +760,7 @@ class SQLAppStatusListenerSuite extends SharedSparkSession with JsonTestUtils
         .allNodes.flatMap(_.metrics.map(_.accumulatorId))
 
     // Assume that AQE update sparkPlanInfo with newPlan
-    // ExecutionMetrics will be replaced using newPlan's SQLMetrics
+    // ExecutionMetrics will be appended using newPlan's SQLMetrics
     listener.onOtherEvent(SparkListenerSQLAdaptiveExecutionUpdate(
       executionId,
       "test",
@@ -770,8 +775,8 @@ class SQLAppStatusListenerSuite extends SharedSparkSession with JsonTestUtils
     listener.onStageSubmitted(SparkListenerStageSubmitted(createStageInfo(1, 0)))
     listener.onTaskStart(SparkListenerTaskStart(1, 0, createTaskInfo(0, 0)))
 
-    // live metrics will be override, and ExecutionMetrics should be empty as the newPlan updated.
-    assert(statusStore.executionMetrics(executionId).isEmpty)
+    // historical metrics will be kept despite of the newPlan updated.
+    assert(statusStore.executionMetrics(executionId).size == 2)
 
     // update new metrics with Id 4 & 5, since 3 is timing metrics,
     // timing metrics has a complicated string presentation so we don't test it here.
@@ -780,9 +785,9 @@ class SQLAppStatusListenerSuite extends SharedSparkSession with JsonTestUtils
       (0L, 1, 0, createAccumulatorInfos(newMetricsValueMap))
     )))
 
-    assert(statusStore.executionMetrics(executionId).size == 2)
+    assert(statusStore.executionMetrics(executionId).size == 4)
     statusStore.executionMetrics(executionId).foreach { m =>
-      assert(m._2 == "500")
+      assert(m._2 == "100" || m._2 == "500")
     }
 
     listener.onTaskEnd(SparkListenerTaskEnd(
@@ -802,14 +807,50 @@ class SQLAppStatusListenerSuite extends SharedSparkSession with JsonTestUtils
       JobSucceeded
     ))
 
-    // aggregateMetrics should ignore metrics from job 0
+    // aggregateMetrics should contains all metrics from job 0 and job 1
     val aggregateMetrics = listener.liveExecutionMetrics(executionId)
     if (aggregateMetrics.isDefined) {
-      oldAccumulatorIds.foreach(id => assert(!aggregateMetrics.get.contains(id)))
+      assert(aggregateMetrics.get.keySet.size == 4)
     }
 
     listener.onOtherEvent(SparkListenerSQLExecutionEnd(
       executionId, System.currentTimeMillis()))
+  }
+
+
+  test("SPARK-34338: Report metrics from Datasource v2 scan") {
+    val statusStore = spark.sharedState.statusStore
+    val oldCount = statusStore.executionsList().size
+
+    val schema = new StructType().add("i", "int").add("j", "int")
+    val physicalPlan = BatchScanExec(schema.toAttributes, new CustomMetricScanBuilder(), Seq.empty)
+    val dummyQueryExecution = new QueryExecution(spark, LocalRelation()) {
+      override lazy val sparkPlan = physicalPlan
+      override lazy val executedPlan = physicalPlan
+    }
+
+    SQLExecution.withNewExecutionId(dummyQueryExecution) {
+      physicalPlan.execute().collect()
+    }
+
+    // Wait until the new execution is started and being tracked.
+    while (statusStore.executionsCount() < oldCount) {
+      Thread.sleep(100)
+    }
+
+    // Wait for listener to finish computing the metrics for the execution.
+    while (statusStore.executionsList().isEmpty ||
+      statusStore.executionsList().last.metricValues == null) {
+      Thread.sleep(100)
+    }
+
+    val execId = statusStore.executionsList().last.executionId
+    val metrics = statusStore.executionMetrics(execId)
+    val expectedMetric = physicalPlan.metrics("custom_metric")
+    val expectedValue = "custom_metric: 12345, 12345"
+
+    assert(metrics.contains(expectedMetric.id))
+    assert(metrics(expectedMetric.id) === expectedValue)
   }
 }
 
@@ -884,4 +925,51 @@ class SQLAppStatusListenerMemoryLeakSuite extends SparkFunSuite {
       }
     }
   }
+}
+
+class SimpleCustomMetric extends CustomMetric {
+  override def name(): String = "custom_metric"
+  override def description(): String = "a simple custom metric"
+  override def aggregateTaskMetrics(taskMetrics: Array[Long]): String = {
+    s"custom_metric: ${taskMetrics.mkString(", ")}"
+  }
+}
+
+// The followings are for custom metrics of V2 data source.
+object CustomMetricReaderFactory extends PartitionReaderFactory {
+  override def createReader(partition: InputPartition): PartitionReader[InternalRow] = {
+    val RangeInputPartition(start, end) = partition
+    new PartitionReader[InternalRow] {
+      private var current = start - 1
+
+      override def next(): Boolean = {
+        current += 1
+        current < end
+      }
+
+      override def get(): InternalRow = InternalRow(current, -current)
+
+      override def close(): Unit = {}
+
+      override def currentMetricsValues(): Array[CustomTaskMetric] = {
+        val metric = new CustomTaskMetric {
+          override def name(): String = "custom_metric"
+          override def value(): Long = 12345
+        }
+        Array(metric)
+      }
+    }
+  }
+}
+
+class CustomMetricScanBuilder extends SimpleScanBuilder {
+  override def planInputPartitions(): Array[InputPartition] = {
+    Array(RangeInputPartition(0, 5), RangeInputPartition(5, 10))
+  }
+
+  override def supportedCustomMetrics(): Array[CustomMetric] = {
+    Array(new SimpleCustomMetric)
+  }
+
+  override def createReaderFactory(): PartitionReaderFactory = CustomMetricReaderFactory
 }

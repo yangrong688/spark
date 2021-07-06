@@ -42,17 +42,20 @@ PySpark installation using `PyPI <https://pypi.org/project/pyspark/>`_ is as fol
 
     pip install pyspark
 
-If you want to install extra dependencies for a specific componenet, you can install it as below:
+If you want to install extra dependencies for a specific component, you can install it as below:
 
 .. code-block:: bash
 
+    # Spark SQL
     pip install pyspark[sql]
+    # pandas API on Spark
+    pip install pyspark[pandas_on_spark] plotly  # to plot your data, you can install plotly together.
 
-For PySpark with a different Hadoop version, you can install it by using ``HADOOP_VERSION`` environment variables as below:
+For PySpark with/without a specific Hadoop version, you can install it by using ``PYSPARK_HADOOP_VERSION`` environment variables as below:
 
 .. code-block:: bash
 
-    HADOOP_VERSION=2.7 pip install pyspark
+    PYSPARK_HADOOP_VERSION=2.7 pip install pyspark
 
 The default distribution uses Hadoop 3.2 and Hive 2.3. If users specify different versions of Hadoop, the pip installation automatically
 downloads a different version and use it in PySpark. Downloading it can take a while depending on
@@ -60,16 +63,21 @@ the network and the mirror chosen. ``PYSPARK_RELEASE_MIRROR`` can be set to manu
 
 .. code-block:: bash
 
-    PYSPARK_RELEASE_MIRROR=http://mirror.apache-kr.org HADOOP_VERSION=2.7 pip install
+    PYSPARK_RELEASE_MIRROR=http://mirror.apache-kr.org PYSPARK_HADOOP_VERSION=2.7 pip install
 
 It is recommended to use ``-v`` option in ``pip`` to track the installation and download status.
 
 .. code-block:: bash
 
-    HADOOP_VERSION=2.7 pip install pyspark -v
+    PYSPARK_HADOOP_VERSION=2.7 pip install pyspark -v
 
-Supported versions of Hadoop are ``HADOOP_VERSION=2.7`` and ``HADOOP_VERSION=3.2`` (default).
-Note that this installation of PySpark with a different version of Hadoop is experimental. It can change or be removed between minor releases.
+Supported values in ``PYSPARK_HADOOP_VERSION`` are:
+
+- ``without``: Spark pre-built with user-provided Apache Hadoop
+- ``2.7``: Spark pre-built for Apache Hadoop 2.7
+- ``3.2``: Spark pre-built for Apache Hadoop 3.2 and later (default)
+
+Note that this installation way of PySpark with/without a specific Hadoop version is experimental. It can change or be removed between minor releases.
 
 
 Using Conda
@@ -100,7 +108,7 @@ Now activate the newly created environment with the following command:
     conda activate pyspark_env
 
 You can install pyspark by `Using PyPI <#using-pypi>`_ to install PySpark in the newly created
-environment, for example as below. It will install PySpark under the new virtual environemnt
+environment, for example as below. It will install PySpark under the new virtual environment
 ``pyspark_env`` created above.
 
 .. code-block:: bash
@@ -121,7 +129,7 @@ Manually Downloading
 --------------------
 
 PySpark is included in the distributions available at the `Apache Spark website <https://spark.apache.org/downloads.html>`_.
-You can download a distribution you want from the site. After that, uncompress the tar file into the directoy where you want
+You can download a distribution you want from the site. After that, uncompress the tar file into the directory where you want
 to install Spark, for example, as below:
 
 .. code-block:: bash
@@ -147,15 +155,26 @@ To install PySpark from source, refer to |building_spark|_.
 
 Dependencies
 ------------
-============= ========================= ================
+============= ========================= ======================================
 Package       Minimum supported version Note
-============= ========================= ================
-`pandas`      0.23.2                    Optional for SQL
-`NumPy`       1.7                       Required for ML 
-`pyarrow`     1.0.0                     Optional for SQL
-`Py4J`        0.10.9                    Required
-============= ========================= ================
+============= ========================= ======================================
+`pandas`      0.23.2                    Optional for Spark SQL
+`NumPy`       1.7                       Required for MLlib DataFrame-based API
+`pyarrow`     1.0.0                     Optional for Spark SQL
+`Py4J`        0.10.9.2                  Required
+`pandas`      0.23.2                    Required for pandas API on Spark
+`pyarrow`     1.0.0                     Required for pandas API on Spark
+`Numpy`       1.14                      Required for pandas API on Spark
+============= ========================= ======================================
 
 Note that PySpark requires Java 8 or later with ``JAVA_HOME`` properly set.  
 If using JDK 11, set ``-Dio.netty.tryReflectionSetAccessible=true`` for Arrow related features and refer
 to |downloading|_.
+
+Note for AArch64 (ARM64) users: PyArrow is required by PySpark SQL, but PyArrow support for AArch64
+is introduced in PyArrow 4.0.0. If PySpark installation fails on AArch64 due to PyArrow
+installation errors, you can install PyArrow >= 4.0.0 as below:
+
+.. code-block:: bash
+
+    pip install "pyarrow>=4.0.0" --prefer-binary

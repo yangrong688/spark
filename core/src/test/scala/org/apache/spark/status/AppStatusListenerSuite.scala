@@ -234,7 +234,7 @@ class AppStatusListenerSuite extends SparkFunSuite with BeforeAndAfter {
 
     // Send two executor metrics update. Only update one metric to avoid a lot of boilerplate code.
     // The tasks are distributed among the two executors, so the executor-level metrics should
-    // hold half of the cummulative value of the metric being updated.
+    // hold half of the cumulative value of the metric being updated.
     Seq(1L, 2L).foreach { value =>
       s1Tasks.foreach { task =>
         val accum = new AccumulableInfo(1L, Some(InternalAccumulator.MEMORY_BYTES_SPILLED),
@@ -256,9 +256,9 @@ class AppStatusListenerSuite extends SparkFunSuite with BeforeAndAfter {
       }
     }
 
-    // Blacklisting executor for stage
+    // Excluding executor for stage
     time += 1
-    listener.onExecutorBlacklistedForStage(SparkListenerExecutorBlacklistedForStage(
+    listener.onExecutorExcludedForStage(SparkListenerExecutorExcludedForStage(
       time = time,
       executorId = execIds.head,
       taskFailures = 2,
@@ -273,18 +273,21 @@ class AppStatusListenerSuite extends SparkFunSuite with BeforeAndAfter {
 
     assert(executorStageSummaryWrappers.nonEmpty)
     executorStageSummaryWrappers.foreach { exec =>
-      // only the first executor is expected to be blacklisted
-      val expectedBlacklistedFlag = exec.executorId == execIds.head
-      assert(exec.info.isBlacklistedForStage === expectedBlacklistedFlag)
+      // only the first executor is expected to be excluded
+      val expectedExcludedFlag = exec.executorId == execIds.head
+      assert(exec.info.isBlacklistedForStage === expectedExcludedFlag)
+      assert(exec.info.isExcludedForStage === expectedExcludedFlag)
     }
 
     check[ExecutorSummaryWrapper](execIds.head) { exec =>
       assert(exec.info.blacklistedInStages === Set(stages.head.stageId))
+      assert(exec.info.excludedInStages === Set(stages.head.stageId))
+
     }
 
-    // Blacklisting node for stage
+    // Excluding node for stage
     time += 1
-    listener.onNodeBlacklistedForStage(SparkListenerNodeBlacklistedForStage(
+    listener.onNodeExcludedForStage(SparkListenerNodeExcludedForStage(
       time = time,
       hostId = "2.example.com", // this is where the second executor is hosted
       executorFailures = 1,
@@ -299,8 +302,10 @@ class AppStatusListenerSuite extends SparkFunSuite with BeforeAndAfter {
 
     assert(executorStageSummaryWrappersForNode.nonEmpty)
     executorStageSummaryWrappersForNode.foreach { exec =>
-      // both executor is expected to be blacklisted
+      // both executor is expected to be excluded
       assert(exec.info.isBlacklistedForStage)
+      assert(exec.info.isExcludedForStage)
+
     }
 
     // Fail one of the tasks, re-start it.
@@ -450,6 +455,7 @@ class AppStatusListenerSuite extends SparkFunSuite with BeforeAndAfter {
 
     check[ExecutorSummaryWrapper](execIds.head) { exec =>
       assert(exec.info.blacklistedInStages === Set())
+      assert(exec.info.excludedInStages === Set())
     }
 
     // Submit stage 2.
@@ -466,9 +472,9 @@ class AppStatusListenerSuite extends SparkFunSuite with BeforeAndAfter {
       assert(stage.info.submissionTime === Some(new Date(stages.last.submissionTime.get)))
     }
 
-    // Blacklisting node for stage
+    // Excluding node for stage
     time += 1
-    listener.onNodeBlacklistedForStage(SparkListenerNodeBlacklistedForStage(
+    listener.onNodeExcludedForStage(SparkListenerNodeExcludedForStage(
       time = time,
       hostId = "1.example.com",
       executorFailures = 1,
@@ -477,6 +483,7 @@ class AppStatusListenerSuite extends SparkFunSuite with BeforeAndAfter {
 
     check[ExecutorSummaryWrapper](execIds.head) { exec =>
       assert(exec.info.blacklistedInStages === Set(stages.last.stageId))
+      assert(exec.info.excludedInStages === Set(stages.last.stageId))
     }
 
     // Start and fail all tasks of stage 2.
@@ -628,30 +635,34 @@ class AppStatusListenerSuite extends SparkFunSuite with BeforeAndAfter {
       assert(job.info.numSkippedTasks === s1Tasks.size)
     }
 
-    // Blacklist an executor.
+    // Exclude an executor.
     time += 1
-    listener.onExecutorBlacklisted(SparkListenerExecutorBlacklisted(time, "1", 42))
+    listener.onExecutorExcluded(SparkListenerExecutorExcluded(time, "1", 42))
     check[ExecutorSummaryWrapper]("1") { exec =>
       assert(exec.info.isBlacklisted)
+      assert(exec.info.isExcluded)
     }
 
     time += 1
-    listener.onExecutorUnblacklisted(SparkListenerExecutorUnblacklisted(time, "1"))
+    listener.onExecutorUnexcluded(SparkListenerExecutorUnexcluded(time, "1"))
     check[ExecutorSummaryWrapper]("1") { exec =>
       assert(!exec.info.isBlacklisted)
+      assert(!exec.info.isExcluded)
     }
 
-    // Blacklist a node.
+    // Exclude a node.
     time += 1
-    listener.onNodeBlacklisted(SparkListenerNodeBlacklisted(time, "1.example.com", 2))
+    listener.onNodeExcluded(SparkListenerNodeExcluded(time, "1.example.com", 2))
     check[ExecutorSummaryWrapper]("1") { exec =>
       assert(exec.info.isBlacklisted)
+      assert(exec.info.isExcluded)
     }
 
     time += 1
-    listener.onNodeUnblacklisted(SparkListenerNodeUnblacklisted(time, "1.example.com"))
+    listener.onNodeUnexcluded(SparkListenerNodeUnexcluded(time, "1.example.com"))
     check[ExecutorSummaryWrapper]("1") { exec =>
       assert(!exec.info.isBlacklisted)
+      assert(!exec.info.isExcluded)
     }
 
     // Stop executors.
@@ -1785,6 +1796,44 @@ class AppStatusListenerSuite extends SparkFunSuite with BeforeAndAfter {
     }
   }
 
+  test("SPARK-34877 - check YarnAmInfoEvent is populated correctly") {
+    def checkInfoPopulated(listener: AppStatusListener,
+       logUrlMap: Map[String, String], processId: String): Unit = {
+      val yarnAmInfo = listener.liveMiscellaneousProcess.get(processId)
+      assert(yarnAmInfo.isDefined)
+      yarnAmInfo.foreach { info =>
+        assert(info.processId == processId)
+        assert(info.isActive)
+        assert(info.processLogs == logUrlMap)
+      }
+      check[ProcessSummaryWrapper](processId) { process =>
+        assert(process.info.id === processId)
+        assert(process.info.isActive)
+        assert(process.info.processLogs == logUrlMap)
+      }
+    }
+    val processId = "yarn-am"
+    val listener = new AppStatusListener(store, conf, true)
+    var stdout = "http:yarnAmHost:2453/con1/stdout"
+    var stderr = "http:yarnAmHost:2453/con2/stderr"
+    var logUrlMap: Map[String, String] = Map("stdout" -> stdout,
+      "stderr" -> stderr)
+    var hostport = "yarnAmHost:2453"
+    var info = new MiscellaneousProcessDetails(hostport, 1, logUrlMap)
+    listener.onOtherEvent(SparkListenerMiscellaneousProcessAdded(123678L, processId, info))
+    checkInfoPopulated(listener, logUrlMap, processId)
+
+    // Launch new AM in case of failure
+    // New container entry will be updated in this scenario
+    stdout = "http:yarnAmHost:2451/con1/stdout"
+    stderr = "http:yarnAmHost:2451/con2/stderr"
+    logUrlMap = Map("stdout" -> stdout,
+      "stderr" -> stderr)
+    hostport = "yarnAmHost:2451"
+    info = new MiscellaneousProcessDetails(hostport, 1, logUrlMap)
+    listener.onOtherEvent(SparkListenerMiscellaneousProcessAdded(123678L, processId, info))
+    checkInfoPopulated(listener, logUrlMap, processId)
+  }
 
   private def key(stage: StageInfo): Array[Int] = Array(stage.stageId, stage.attemptNumber)
 

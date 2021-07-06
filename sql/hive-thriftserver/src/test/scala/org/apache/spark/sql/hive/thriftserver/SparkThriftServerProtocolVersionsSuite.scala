@@ -20,35 +20,37 @@ package org.apache.spark.sql.hive.thriftserver
 import java.sql.{Date, Timestamp}
 import java.util.{List => JList, Properties}
 
+import org.apache.hadoop.hive.common.`type`.{HiveIntervalDayTime, HiveIntervalYearMonth}
 import org.apache.hive.jdbc.{HiveConnection, HiveQueryResultSet}
 import org.apache.hive.service.auth.PlainSaslHelper
 import org.apache.hive.service.cli.GetInfoType
+import org.apache.hive.service.rpc.thrift.{TExecuteStatementReq, TGetInfoReq, TGetTablesReq, TOpenSessionReq, TProtocolVersion}
+import org.apache.hive.service.rpc.thrift.TCLIService.Client
 import org.apache.thrift.protocol.TBinaryProtocol
 import org.apache.thrift.transport.TSocket
 
 import org.apache.spark.sql.catalyst.util.NumberConverter
-import org.apache.spark.sql.hive.HiveUtils
 import org.apache.spark.unsafe.types.UTF8String
 
-class SparkThriftServerProtocolVersionsSuite extends HiveThriftJdbcTest {
+class SparkThriftServerProtocolVersionsSuite extends HiveThriftServer2TestBase {
 
   override def mode: ServerMode.Value = ServerMode.binary
 
   def testExecuteStatementWithProtocolVersion(
-      version: ThriftserverShimUtils.TProtocolVersion,
+      version: TProtocolVersion,
       sql: String)(f: HiveQueryResultSet => Unit): Unit = {
     val rawTransport = new TSocket("localhost", serverPort)
     val connection = new HiveConnection(s"jdbc:hive2://localhost:$serverPort", new Properties)
     val user = System.getProperty("user.name")
     val transport = PlainSaslHelper.getPlainTransport(user, "anonymous", rawTransport)
-    val client = new ThriftserverShimUtils.Client(new TBinaryProtocol(transport))
+    val client = new Client(new TBinaryProtocol(transport))
     transport.open()
     var rs: HiveQueryResultSet = null
     try {
-      val clientProtocol = new ThriftserverShimUtils.TOpenSessionReq(version)
+      val clientProtocol = new TOpenSessionReq(version)
       val openResp = client.OpenSession(clientProtocol)
       val sessHandle = openResp.getSessionHandle
-      val execReq = new ThriftserverShimUtils.TExecuteStatementReq(sessHandle, sql)
+      val execReq = new TExecuteStatementReq(sessHandle, sql)
       val execResp = client.ExecuteStatement(execReq)
       val stmtHandle = execResp.getOperationHandle
 
@@ -73,23 +75,21 @@ class SparkThriftServerProtocolVersionsSuite extends HiveThriftJdbcTest {
     }
   }
 
-  def testGetInfoWithProtocolVersion(version: ThriftserverShimUtils.TProtocolVersion): Unit = {
+  def testGetInfoWithProtocolVersion(version: TProtocolVersion): Unit = {
     val rawTransport = new TSocket("localhost", serverPort)
     val connection = new HiveConnection(s"jdbc:hive2://localhost:$serverPort", new Properties)
     val transport = PlainSaslHelper.getPlainTransport(user, "anonymous", rawTransport)
-    val client = new ThriftserverShimUtils.Client(new TBinaryProtocol(transport))
+    val client = new Client(new TBinaryProtocol(transport))
     transport.open()
     try {
-      val clientProtocol = new ThriftserverShimUtils.TOpenSessionReq(version)
+      val clientProtocol = new TOpenSessionReq(version)
       val openResp = client.OpenSession(clientProtocol)
       val sessHandle = openResp.getSessionHandle
 
-      val dbVersionReq =
-        new ThriftserverShimUtils.TGetInfoReq(sessHandle, GetInfoType.CLI_DBMS_VER.toTGetInfoType)
+      val dbVersionReq = new TGetInfoReq(sessHandle, GetInfoType.CLI_DBMS_VER.toTGetInfoType)
       val dbVersion = client.GetInfo(dbVersionReq).getInfoValue.getStringValue
 
-      val dbNameReq =
-        new ThriftserverShimUtils.TGetInfoReq(sessHandle, GetInfoType.CLI_DBMS_NAME.toTGetInfoType)
+      val dbNameReq = new TGetInfoReq(sessHandle, GetInfoType.CLI_DBMS_NAME.toTGetInfoType)
       val dbName = client.GetInfo(dbNameReq).getInfoValue.getStringValue
 
       assert(dbVersion === org.apache.spark.SPARK_VERSION)
@@ -102,21 +102,21 @@ class SparkThriftServerProtocolVersionsSuite extends HiveThriftJdbcTest {
   }
 
   def testGetTablesWithProtocolVersion(
-      version: ThriftserverShimUtils.TProtocolVersion,
+      version: TProtocolVersion,
       schema: String,
       tableNamePattern: String,
       tableTypes: JList[String])(f: HiveQueryResultSet => Unit): Unit = {
     val rawTransport = new TSocket("localhost", serverPort)
     val connection = new HiveConnection(s"jdbc:hive2://localhost:$serverPort", new Properties)
     val transport = PlainSaslHelper.getPlainTransport(user, "anonymous", rawTransport)
-    val client = new ThriftserverShimUtils.Client(new TBinaryProtocol(transport))
+    val client = new Client(new TBinaryProtocol(transport))
     transport.open()
     var rs: HiveQueryResultSet = null
     try {
-      val clientProtocol = new ThriftserverShimUtils.TOpenSessionReq(version)
+      val clientProtocol = new TOpenSessionReq(version)
       val openResp = client.OpenSession(clientProtocol)
       val sessHandle = openResp.getSessionHandle
-      val getTableReq = new ThriftserverShimUtils.TGetTablesReq(sessHandle)
+      val getTableReq = new TGetTablesReq(sessHandle)
       getTableReq.setSchemaName(schema)
       getTableReq.setTableName(tableNamePattern)
       getTableReq.setTableTypes(tableTypes)
@@ -144,7 +144,7 @@ class SparkThriftServerProtocolVersionsSuite extends HiveThriftJdbcTest {
     }
   }
 
-  ThriftserverShimUtils.testedProtocolVersions.foreach { version =>
+  TProtocolVersion.values().foreach { version =>
     test(s"$version get byte type") {
       testExecuteStatementWithProtocolVersion(version, "SELECT cast(1 as byte)") { rs =>
         assert(rs.next())
@@ -356,12 +356,8 @@ class SparkThriftServerProtocolVersionsSuite extends HiveThriftJdbcTest {
         assert(metaData.getColumnName(1) === "NULL")
         assert(metaData.getColumnTypeName(1) === "void")
         assert(metaData.getColumnType(1) === java.sql.Types.NULL)
-        if (HiveUtils.isHive23) {
-          // For Hive 1.2 the o.a.h.j.JdbcColumn.typeStringToHiveType can not recognize `null` as
-          // type name.
-          assert(metaData.getPrecision(1) === 0)
-          assert(metaData.getScale(1) === 0)
-        }
+        assert(metaData.getPrecision(1) === 0)
+        assert(metaData.getScale(1) === 0)
       }
     }
 
@@ -461,6 +457,30 @@ class SparkThriftServerProtocolVersionsSuite extends HiveThriftJdbcTest {
         testGetTablesWithProtocolVersion(version, "%", "table1", null) { rs =>
           checkResult(Seq("table1"), rs)
         }
+      }
+    }
+
+    test(s"SPARK-35017: $version get day-time interval type") {
+      testExecuteStatementWithProtocolVersion(
+        version, "SELECT INTERVAL '1 10:11:12' DAY TO SECOND AS dt") { rs =>
+        assert(rs.next())
+        assert(rs.getObject(1) === new HiveIntervalDayTime(1, 10, 11, 12, 0))
+        val metaData = rs.getMetaData
+        assert(metaData.getColumnName(1) === "dt")
+        assert(metaData.getColumnTypeName(1) === "interval_day_time")
+        assert(metaData.getColumnType(1) === java.sql.Types.OTHER)
+      }
+    }
+
+    test(s"SPARK-35018: $version get year-month interval type") {
+      testExecuteStatementWithProtocolVersion(
+        version, "SELECT INTERVAL '1-1' YEAR TO MONTH AS ym") { rs =>
+        assert(rs.next())
+        assert(rs.getObject(1) === new HiveIntervalYearMonth(1, 1))
+        val metaData = rs.getMetaData
+        assert(metaData.getColumnName(1) === "ym")
+        assert(metaData.getColumnTypeName(1) === "interval_year_month")
+        assert(metaData.getColumnType(1) === java.sql.Types.OTHER)
       }
     }
   }

@@ -28,6 +28,7 @@ import org.json4s.NoTypeHints
 import org.json4s.jackson.Serialization
 
 import org.apache.spark.sql.SparkSession
+import org.apache.spark.sql.errors.QueryExecutionErrors
 import org.apache.spark.util.Utils
 
 /**
@@ -112,7 +113,7 @@ abstract class CompactibleFileStreamLog[T <: AnyRef : ClassTag](
    * Default implementation retains all log entries. Implementations should override the method
    * to change the behavior.
    */
-  def shouldRetain(log: T): Boolean = true
+  def shouldRetain(log: T, currentTime: Long): Boolean = true
 
   override def batchIdToPath(batchId: Long): Path = {
     if (isCompactionBatch(batchId, compactInterval)) {
@@ -179,8 +180,8 @@ abstract class CompactibleFileStreamLog[T <: AnyRef : ClassTag](
    * To simplify the situation, this method just throws UnsupportedOperationException regardless
    * of given parameter, and let CompactibleFileStreamLog handles purging by itself.
    */
-  override def purge(thresholdBatchId: Long): Unit = throw new UnsupportedOperationException(
-    s"Cannot purge as it might break internal state.")
+  override def purge(thresholdBatchId: Long): Unit =
+    throw QueryExecutionErrors.cannotPurgeAsBreakInternalStateError()
 
   /**
    * Apply function on all entries in the specific batch. The method will throw
@@ -218,8 +219,9 @@ abstract class CompactibleFileStreamLog[T <: AnyRef : ClassTag](
    * corresponding `batchId` file. It will delete expired files as well if enabled.
    */
   private def compact(batchId: Long, logs: Array[T]): Boolean = {
+    val curTime = System.currentTimeMillis()
     def writeEntry(entry: T, output: OutputStream): Unit = {
-      if (shouldRetain(entry)) {
+      if (shouldRetain(entry, curTime)) {
         output.write('\n')
         serializeEntry(entry, output)
       }
@@ -249,6 +251,7 @@ abstract class CompactibleFileStreamLog[T <: AnyRef : ClassTag](
    * Returns all files except the deleted ones.
    */
   def allFiles(): Array[T] = {
+    val curTime = System.currentTimeMillis()
     var latestId = getLatestBatchId().getOrElse(-1L)
     // There is a race condition when `FileStreamSink` is deleting old files and `StreamFileIndex`
     // is calling this method. This loop will retry the reading to deal with the
@@ -258,7 +261,7 @@ abstract class CompactibleFileStreamLog[T <: AnyRef : ClassTag](
         try {
           val logs =
             getAllValidBatches(latestId, compactInterval).flatMap { id =>
-              filterInBatch(id)(shouldRetain).getOrElse {
+              filterInBatch(id)(shouldRetain(_, curTime)).getOrElse {
                 throw new IllegalStateException(
                   s"${batchIdToPath(id)} doesn't exist " +
                     s"(latestId: $latestId, compactInterval: $compactInterval)")
@@ -286,7 +289,7 @@ abstract class CompactibleFileStreamLog[T <: AnyRef : ClassTag](
 
   /**
    * Delete expired log entries that proceed the currentBatchId and retain
-   * sufficient minimum number of batches (given by minBatchsToRetain). This
+   * sufficient minimum number of batches (given by minBatchesToRetain). This
    * equates to retaining the earliest compaction log that proceeds
    * batch id position currentBatchId + 1 - minBatchesToRetain. All log entries
    * prior to the earliest compaction log proceeding that position will be removed.

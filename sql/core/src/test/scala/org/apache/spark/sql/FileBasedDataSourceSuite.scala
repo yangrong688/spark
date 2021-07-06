@@ -577,38 +577,6 @@ class FileBasedDataSourceSuite extends QueryTest
     }
   }
 
-  test("Option pathGlobFilter: filter files correctly") {
-    withTempPath { path =>
-      val dataDir = path.getCanonicalPath
-      Seq("foo").toDS().write.text(dataDir)
-      Seq("bar").toDS().write.mode("append").orc(dataDir)
-      val df = spark.read.option("pathGlobFilter", "*.txt").text(dataDir)
-      checkAnswer(df, Row("foo"))
-
-      // Both glob pattern in option and path should be effective to filter files.
-      val df2 = spark.read.option("pathGlobFilter", "*.txt").text(dataDir + "/*.orc")
-      checkAnswer(df2, Seq.empty)
-
-      val df3 = spark.read.option("pathGlobFilter", "*.txt").text(dataDir + "/*xt")
-      checkAnswer(df3, Row("foo"))
-    }
-  }
-
-  test("Option pathGlobFilter: simple extension filtering should contains partition info") {
-    withTempPath { path =>
-      val input = Seq(("foo", 1), ("oof", 2)).toDF("a", "b")
-      input.write.partitionBy("b").text(path.getCanonicalPath)
-      Seq("bar").toDS().write.mode("append").orc(path.getCanonicalPath + "/b=1")
-
-      // If we use glob pattern in the path, the partition column won't be shown in the result.
-      val df = spark.read.text(path.getCanonicalPath + "/*/*.txt")
-      checkAnswer(df, input.select("a"))
-
-      val df2 = spark.read.option("pathGlobFilter", "*.txt").text(path.getCanonicalPath)
-      checkAnswer(df2, input)
-    }
-  }
-
   test("Option recursiveFileLookup: recursive loading correctly") {
 
     val expectedFileList = mutable.ListBuffer[String]()
@@ -791,7 +759,7 @@ class FileBasedDataSourceSuite extends QueryTest
           }.isEmpty)
 
           val fileScan = df.queryExecution.executedPlan collectFirst {
-            case BatchScanExec(_, f: FileScan) => f
+            case BatchScanExec(_, f: FileScan, _) => f
           }
           assert(fileScan.nonEmpty)
           assert(fileScan.get.partitionFilters.nonEmpty)
@@ -831,28 +799,12 @@ class FileBasedDataSourceSuite extends QueryTest
           assert(filterCondition.isDefined)
 
           val fileScan = df.queryExecution.executedPlan collectFirst {
-            case BatchScanExec(_, f: FileScan) => f
+            case BatchScanExec(_, f: FileScan, _) => f
           }
           assert(fileScan.nonEmpty)
           assert(fileScan.get.partitionFilters.isEmpty)
           assert(fileScan.get.dataFilters.nonEmpty)
           checkAnswer(df, Row("a", 1, 2))
-        }
-      }
-    }
-  }
-
-  test("SPARK-31935: Hadoop file system config should be effective in data source options") {
-    Seq("parquet", "").foreach { format =>
-      withSQLConf(
-        SQLConf.USE_V1_SOURCE_LIST.key -> format,
-        "fs.file.impl" -> classOf[FakeFileSystemRequiringDSOption].getName,
-        "fs.file.impl.disable.cache" -> "true") {
-        withTempDir { dir =>
-          val path = "file:" + dir.getCanonicalPath.stripPrefix("file:")
-          spark.range(10).write.option("ds_option", "value").mode("overwrite").parquet(path)
-          checkAnswer(
-            spark.read.option("ds_option", "value").parquet(path), spark.range(10).toDF())
         }
       }
     }
@@ -1003,6 +955,16 @@ class FileBasedDataSourceSuite extends QueryTest
           assert(!explain.contains("..."))
         }
       }
+    }
+  }
+
+  test("SPARK-35669: special char in CSV header with filter pushdown") {
+    withTempPath { path =>
+      val pathStr = path.getCanonicalPath
+      Seq("a / b,a`b", "v1,v2").toDF().coalesce(1).write.text(pathStr)
+      val df = spark.read.option("header", true).csv(pathStr)
+        .where($"a / b".isNotNull and $"`a``b`".isNotNull)
+      checkAnswer(df, Row("v1", "v2"))
     }
   }
 }

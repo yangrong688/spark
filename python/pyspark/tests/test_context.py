@@ -43,6 +43,7 @@ class CheckpointTests(ReusedPySparkTestCase):
 
         self.assertFalse(flatMappedRDD.isCheckpointed())
         self.assertTrue(flatMappedRDD.getCheckpointFile() is None)
+        self.assertFalse(self.sc.getCheckpointDir() is None)
 
         flatMappedRDD.checkpoint()
         result = flatMappedRDD.collect()
@@ -51,6 +52,8 @@ class CheckpointTests(ReusedPySparkTestCase):
         self.assertEqual(flatMappedRDD.collect(), result)
         self.assertEqual("file:" + self.checkpointDir.name,
                          os.path.dirname(os.path.dirname(flatMappedRDD.getCheckpointFile())))
+        self.assertEqual(self.sc.getCheckpointDir(),
+                         os.path.dirname(flatMappedRDD.getCheckpointFile()))
 
     def test_checkpoint_and_restore(self):
         parCollection = self.sc.parallelize([1, 2, 3, 4])
@@ -172,8 +175,8 @@ class ContextTests(unittest.TestCase):
         with SparkContext() as sc:
             temp_files = os.listdir(sc._temp_dir)
             rdd = sc.parallelize([0, 1, 2])
-            post_parallalize_temp_files = os.listdir(sc._temp_dir)
-            self.assertEqual(temp_files, post_parallalize_temp_files)
+            post_parallelize_temp_files = os.listdir(sc._temp_dir)
+            self.assertEqual(temp_files, post_parallelize_temp_files)
 
     def test_set_conf(self):
         # This is for an internal use case. When there is an existing SparkContext,
@@ -198,7 +201,7 @@ class ContextTests(unittest.TestCase):
         try:
             with SparkContext() as sc:
                 self.assertNotEqual(SparkContext._active_spark_context, None)
-                raise Exception()
+                raise RuntimeError()
         except:
             pass
         self.assertEqual(SparkContext._active_spark_context, None)
@@ -217,7 +220,7 @@ class ContextTests(unittest.TestCase):
             def run():
                 # When thread is pinned, job group should be set for each thread for now.
                 # Local properties seem not being inherited like Scala side does.
-                if os.environ.get("PYSPARK_PIN_THREAD", "false").lower() == "true":
+                if os.environ.get("PYSPARK_PIN_THREAD", "true").lower() == "true":
                     sc.setJobGroup('test_progress_api', '', True)
                 try:
                     rdd.count()

@@ -45,7 +45,7 @@ class StorageLevel private(
   extends Externalizable {
 
   // TODO: Also add fields for caching priority, dataset ID, and flushing.
-  private def this(flags: Int, replication: Int) {
+  private def this(flags: Int, replication: Int) = {
     this((flags & 8) != 0, (flags & 4) != 0, (flags & 2) != 0, (flags & 1) != 0, replication)
   }
 
@@ -58,10 +58,6 @@ class StorageLevel private(
   def replication: Int = _replication
 
   assert(replication < 40, "Replication restricted to be less than 40 for calculating hash codes")
-
-  if (useOffHeap) {
-    require(!deserialized, "Off-heap storage level does not support deserialized storage")
-  }
 
   private[spark] def memoryMode: MemoryMode = {
     if (useOffHeap) MemoryMode.OFF_HEAP

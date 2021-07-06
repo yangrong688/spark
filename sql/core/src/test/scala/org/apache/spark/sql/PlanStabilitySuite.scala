@@ -30,7 +30,6 @@ import org.apache.spark.sql.execution._
 import org.apache.spark.sql.execution.adaptive.DisableAdaptiveExecutionSuite
 import org.apache.spark.sql.execution.exchange.{Exchange, ReusedExchangeExec}
 import org.apache.spark.sql.internal.SQLConf
-import org.apache.spark.tags.ExtendedSQLTest
 
 // scalastyle:off line.size.limit
 /**
@@ -45,28 +44,25 @@ import org.apache.spark.tags.ExtendedSQLTest
  *   actual explain plan: /path/to/tmp/q1.actual.explain.txt
  *   [actual simplified plan]
  *
- * The explain files are saved to help debug later, they are not checked. Only the simplified
- * plans are checked (by string comparison).
- *
  *
  * To run the entire test suite:
  * {{{
- *   build/sbt "sql/test-only *PlanStability[WithStats]Suite"
+ *   build/sbt "sql/testOnly *PlanStability[WithStats]Suite"
  * }}}
  *
  * To run a single test file upon change:
  * {{{
- *   build/sbt "sql/test-only *PlanStability[WithStats]Suite -- -z (tpcds-v1.4/q49)"
+ *   build/sbt "sql/testOnly *PlanStability[WithStats]Suite -- -z (tpcds-v1.4/q49)"
  * }}}
  *
  * To re-generate golden files for entire suite, run:
  * {{{
- *   SPARK_GENERATE_GOLDEN_FILES=1 build/sbt "sql/test-only *PlanStability[WithStats]Suite"
+ *   SPARK_GENERATE_GOLDEN_FILES=1 build/sbt "sql/testOnly *PlanStability[WithStats]Suite"
  * }}}
  *
  * To re-generate golden file for a single test, run:
  * {{{
- *   SPARK_GENERATE_GOLDEN_FILES=1 build/sbt "sql/test-only *PlanStability[WithStats]Suite -- -z (tpcds-v1.4/q49)"
+ *   SPARK_GENERATE_GOLDEN_FILES=1 build/sbt "sql/testOnly *PlanStability[WithStats]Suite -- -z (tpcds-v1.4/q49)"
  * }}}
  */
 // scalastyle:on line.size.limit
@@ -88,7 +84,7 @@ trait PlanStabilitySuite extends TPCDSBase with DisableAdaptiveExecutionSuite {
 
   protected val baseResourcePath = {
     // use the same way as `SQLQueryTestSuite` to get the resource path
-    java.nio.file.Paths.get("src", "test", "resources", "tpcds-plan-stability").toFile
+    getWorkspaceFilePath("sql", "core", "src", "test", "resources", "tpcds-plan-stability").toFile
   }
 
   private val referenceRegex = "#\\d+".r
@@ -102,10 +98,13 @@ trait PlanStabilitySuite extends TPCDSBase with DisableAdaptiveExecutionSuite {
     new File(goldenFilePath, name)
   }
 
-  private def isApproved(dir: File, actualSimplifiedPlan: String): Boolean = {
-    val file = new File(dir, "simplified.txt")
-    val expected = FileUtils.readFileToString(file, StandardCharsets.UTF_8)
-    expected == actualSimplifiedPlan
+  private def isApproved(
+      dir: File, actualSimplifiedPlan: String, actualExplain: String): Boolean = {
+    val simplifiedFile = new File(dir, "simplified.txt")
+    val expectedSimplified = FileUtils.readFileToString(simplifiedFile, StandardCharsets.UTF_8)
+    lazy val explainFile = new File(dir, "explain.txt")
+    lazy val expectedExplain = FileUtils.readFileToString(explainFile, StandardCharsets.UTF_8)
+    expectedSimplified == actualSimplifiedPlan && expectedExplain == actualExplain
   }
 
   /**
@@ -120,7 +119,7 @@ trait PlanStabilitySuite extends TPCDSBase with DisableAdaptiveExecutionSuite {
   private def generateGoldenFile(plan: SparkPlan, name: String, explain: String): Unit = {
     val dir = getDirForTest(name)
     val simplified = getSimplifiedPlan(plan)
-    val foundMatch = dir.exists() && isApproved(dir, simplified)
+    val foundMatch = dir.exists() && isApproved(dir, simplified, explain)
 
     if (!foundMatch) {
       FileUtils.deleteDirectory(dir)
@@ -138,7 +137,7 @@ trait PlanStabilitySuite extends TPCDSBase with DisableAdaptiveExecutionSuite {
     val dir = getDirForTest(name)
     val tempDir = FileUtils.getTempDirectory
     val actualSimplified = getSimplifiedPlan(plan)
-    val foundMatch = isApproved(dir, actualSimplified)
+    val foundMatch = isApproved(dir, actualSimplified, explain)
 
     if (!foundMatch) {
       // show diff with last approved

@@ -32,13 +32,15 @@ import org.apache.spark.sql.types.StructType
 class NoSuchDatabaseException(
     val db: String) extends NoSuchNamespaceException(s"Database '$db' not found")
 
-class NoSuchNamespaceException(message: String) extends AnalysisException(message) {
+class NoSuchNamespaceException(message: String, cause: Option[Throwable] = None)
+  extends AnalysisException(message, cause = cause) {
   def this(namespace: Array[String]) = {
     this(s"Namespace '${namespace.quoted}' not found")
   }
 }
 
-class NoSuchTableException(message: String) extends AnalysisException(message) {
+class NoSuchTableException(message: String, cause: Option[Throwable] = None)
+  extends AnalysisException(message, cause = cause) {
   def this(db: String, table: String) = {
     this(s"Table or view '$table' not found in database '$db'")
   }
@@ -63,10 +65,20 @@ class NoSuchPartitionException(message: String) extends AnalysisException(messag
 class NoSuchPermanentFunctionException(db: String, func: String)
   extends AnalysisException(s"Function '$func' not found in database '$db'")
 
-class NoSuchFunctionException(db: String, func: String, cause: Option[Throwable] = None)
-  extends AnalysisException(
-    s"Undefined function: '$func'. This function is neither a registered temporary function nor " +
-    s"a permanent function registered in the database '$db'.", cause = cause)
+class NoSuchFunctionException(
+    msg: String,
+    cause: Option[Throwable]) extends AnalysisException(msg, cause = cause) {
+
+  def this(db: String, func: String, cause: Option[Throwable] = None) = {
+    this(s"Undefined function: '$func'. " +
+        s"This function is neither a registered temporary function nor " +
+        s"a permanent function registered in the database '$db'.", cause = cause)
+  }
+
+  def this(identifier: Identifier) = {
+    this(s"Undefined function: ${identifier.quoted}", cause = None)
+  }
+}
 
 class NoSuchPartitionsException(message: String) extends AnalysisException(message) {
   def this(db: String, table: String, specs: Seq[TablePartitionSpec]) = {

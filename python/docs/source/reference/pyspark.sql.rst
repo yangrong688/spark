@@ -73,6 +73,17 @@ See also :class:`SparkSession`.
     SparkSession.version
 
 
+Configuration
+-------------
+
+.. currentmodule:: pyspark.sql.conf
+
+.. autosummary::
+    :toctree: api/
+
+    RuntimeConfig
+
+
 Input and Output
 ----------------
 
@@ -207,6 +218,7 @@ DataFrame APIs
     DataFrame.write
     DataFrame.writeStream
     DataFrame.writeTo
+    DataFrame.to_pandas_on_spark
     DataFrameNaFunctions.drop
     DataFrameNaFunctions.fill
     DataFrameNaFunctions.replace
@@ -217,6 +229,45 @@ DataFrame APIs
     DataFrameStatFunctions.freqItems
     DataFrameStatFunctions.sampleBy
 
+Column APIs
+-----------
+
+.. currentmodule:: pyspark.sql
+
+.. autosummary::
+    :toctree: api/
+
+    Column.alias
+    Column.asc
+    Column.asc_nulls_first
+    Column.asc_nulls_last
+    Column.astype
+    Column.between
+    Column.bitwiseAND
+    Column.bitwiseOR
+    Column.bitwiseXOR
+    Column.cast
+    Column.contains
+    Column.desc
+    Column.desc_nulls_first
+    Column.desc_nulls_last
+    Column.dropFields
+    Column.endswith
+    Column.eqNullSafe
+    Column.getField
+    Column.getItem
+    Column.isNotNull
+    Column.isNull
+    Column.isin
+    Column.like
+    Column.name
+    Column.otherwise
+    Column.over
+    Column.rlike
+    Column.startswith
+    Column.substr
+    Column.when
+    Column.withField
 
 Data Types
 ----------
@@ -224,7 +275,7 @@ Data Types
 .. currentmodule:: pyspark.sql.types
 
 .. autosummary::
-    :template: class_with_docs.rst
+    :template: autosummary/class_with_docs.rst
     :toctree: api/
 
     ArrayType
@@ -268,6 +319,7 @@ Functions
 
     abs
     acos
+    acosh
     add_months
     aggregate
     approxCountDistinct
@@ -292,11 +344,15 @@ Functions
     asc_nulls_last
     ascii
     asin
+    asinh
+    assert_true
     atan
+    atanh
     atan2
     avg
     base64
     bin
+    bitwise_not
     bitwiseNOT
     broadcast
     bround
@@ -315,6 +371,7 @@ Functions
     cos
     cosh
     count
+    count_distinct
     countDistinct
     covar_pop
     covar_samp
@@ -409,6 +466,7 @@ Functions
     months_between
     nanvl
     next_day
+    nth_value
     ntile
     overlay
     pandas_udf
@@ -417,8 +475,10 @@ Functions
     posexplode
     posexplode_outer
     pow
+    product
     quarter
     radians
+    raise_error
     rand
     randn
     rank
@@ -434,12 +494,13 @@ Functions
     schema_of_csv
     schema_of_json
     second
+    sentences
     sequence
     sha1
     sha2
-    shiftLeft
-    shiftRight
-    shiftRightUnsigned
+    shiftleft
+    shiftright
+    shiftrightunsigned
     shuffle
     signum
     sin
@@ -459,6 +520,7 @@ Functions
     substring
     substring_index
     sum
+    sum_distinct
     sumDistinct
     tan
     tanh
@@ -541,4 +603,3 @@ Grouping
     GroupedData.pivot
     GroupedData.sum
     PandasCogroupedOps.applyInPandas
-
